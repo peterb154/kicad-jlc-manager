@@ -1,6 +1,6 @@
 [project]
 name = "kicad-jlc-manager"
-version = "0.0.0"
+version = "0.1.0"
 description = "Project-local JLC component library manager for KiCad"
 readme = "README.md"
 authors = [
