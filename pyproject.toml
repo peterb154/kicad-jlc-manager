@@ -17,8 +17,8 @@ dependencies = [
 jlcmgr = "kicad_jlc_manager.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/kicad-jlc-manager"
-Repository = "https://github.com/yourusername/kicad-jlc-manager.git"
+Homepage = "https://github.com/peterb154/kicad-jlc-manager"
+Repository = "https://github.com/peterb154/kicad-jlc-manager"
 
 [project.optional-dependencies]
 dev = [
