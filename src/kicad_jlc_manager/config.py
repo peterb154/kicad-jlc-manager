@@ -1,9 +1,7 @@
 """Configuration management for jlcproject.toml."""
 
-from pathlib import Path
-from typing import Dict, Optional
 import tomllib  # Python 3.11+
-import json
+from pathlib import Path
 
 
 class ProjectConfig:
@@ -13,9 +11,9 @@ class ProjectConfig:
         """Initialize with project root directory."""
         self.project_root = project_root
         self.config_file = project_root / "jlcproject.toml"
-        self._config: Optional[Dict] = None
+        self._config: dict | None = None
 
-    def load(self) -> Dict:
+    def load(self) -> dict:
         """Load configuration from jlcproject.toml."""
         if not self.config_file.exists():
             self._config = self._get_default_config()
@@ -36,13 +34,13 @@ class ProjectConfig:
         with open(self.config_file, "w") as f:
             f.write("components = [\n")
             components = self._config.get("components", {})
-            for jlc_id, description in components.items():
-                if description:
-                    # Write with inline comment
-                    f.write(f'    "{jlc_id}",  # {description}\n')
-                else:
-                    # No description
-                    f.write(f'    "{jlc_id}",\n')
+
+            # Convert to list if dict (for backward compatibility)
+            if isinstance(components, dict):
+                components = list(components.keys())
+
+            for jlc_id in components:
+                f.write(f'    "{jlc_id}",\n')
             f.write("]\n\n")
 
             f.write("[project]\n")
@@ -51,14 +49,14 @@ class ProjectConfig:
                 if key != "components":  # Skip if accidentally included
                     f.write(f'{key} = "{value}"\n')
 
-    def _get_default_config(self) -> Dict:
+    def _get_default_config(self) -> dict:
         """Get default configuration."""
         return {
             "project": {
                 "lib-dir": "jlclib",
                 "lib-name": "JLC_Project",
             },
-            "components": {},  # Dict of jlc_id -> optional description
+            "components": [],  # List of JLC IDs
         }
 
     def get_lib_dir(self) -> str:
@@ -74,41 +72,95 @@ class ProjectConfig:
     def get_components(self) -> list[str]:
         """Get list of component JLC IDs."""
         config = self.load()
-        components = config.get("components", {})
-        # Handle both old list format and new dict format
-        if isinstance(components, list):
-            return components
-        return list(components.keys())
+        components = config.get("components", [])
+        # Handle both list and dict format (dict for backward compatibility)
+        if isinstance(components, dict):
+            return list(components.keys())
+        return components
 
-    def add_component(self, jlc_id: str, description: str = ""):
-        """Add a component to the configuration with optional description."""
+    def get_components_with_descriptions(self) -> dict[str, str]:
+        """
+        Get components with their descriptions by parsing the TOML file.
+
+        Returns dict of {jlc_id: description}. Description will be empty string
+        if no inline comment exists.
+        """
+        if not self.config_file.exists():
+            return {}
+
+        components_dict = {}
+        content = self.config_file.read_text()
+        lines = content.splitlines()
+
+        in_components_array = False
+        for line in lines:
+            stripped = line.strip()
+
+            # Detect start of components array
+            if stripped.startswith("components"):
+                in_components_array = True
+                continue
+
+            # Detect end of components array
+            if in_components_array and stripped.startswith("["):
+                break
+
+            # Parse component lines
+            if in_components_array and stripped.startswith('"'):
+                # Extract JLC ID
+                if '"' in stripped:
+                    parts = stripped.split('"')
+                    if len(parts) >= 2:
+                        jlc_id = parts[1]
+
+                        # Extract description from inline comment
+                        description = ""
+                        if "#" in stripped:
+                            comment_part = stripped.split("#", 1)[1].strip()
+                            description = comment_part
+
+                        components_dict[jlc_id] = description
+
+        return components_dict
+
+    def add_component(self, jlc_id: str):
+        """Add a component to the configuration."""
         config = self.load()
         if "components" not in config:
-            config["components"] = {}
-        # Handle old list format - convert to dict
-        if isinstance(config["components"], list):
-            old_list = config["components"]
-            config["components"] = {comp: "" for comp in old_list}
+            config["components"] = []
 
-        config["components"][jlc_id] = description
+        # Convert dict to list if needed (backward compatibility)
+        if isinstance(config["components"], dict):
+            config["components"] = list(config["components"].keys())
+
+        # Add component if not already present
+        if jlc_id not in config["components"]:
+            config["components"].append(jlc_id)
+
         self._config = config
         self.save()
 
-    def remove_component(self, jlc_id: str):
-        """Remove a component from the configuration."""
+    def remove_component(self, jlc_id: str) -> bool:
+        """Remove a component from the configuration.
+
+        Returns:
+            True if component was found and removed, False otherwise
+        """
         config = self.load()
-        components = config.get("components", {})
-        # Handle both list and dict format
-        if isinstance(components, list):
-            if jlc_id in components:
-                components.remove(jlc_id)
-        elif isinstance(components, dict):
-            if jlc_id in components:
-                del components[jlc_id]
+        components = config.get("components", [])
 
-        config["components"] = components
-        self._config = config
-        self.save()
+        # Convert dict to list if needed (backward compatibility)
+        if isinstance(components, dict):
+            components = list(components.keys())
+
+        found = jlc_id in components
+        if found:
+            components.remove(jlc_id)
+            config["components"] = components
+            self._config = config
+            self.save()
+
+        return found
 
     def ensure_gitignore(self):
         """Ensure .gitignore excludes jlclib/ directory."""

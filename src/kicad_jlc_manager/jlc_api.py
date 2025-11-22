@@ -1,67 +1,77 @@
 """JLC API client for fetching component information."""
 
+
 import requests
-from typing import Optional
 
 
-def fetch_component_description(jlc_id: str) -> Optional[str]:
+def fetch_component_description(jlc_id: str) -> str | None:
     """
-    Fetch component description from JLC API.
+    Fetch component description from LCSC/JLCPCB API.
 
     Returns a human-readable description like:
+    - "10uF 25V X5R ±10% 0805 Multilayer Ceramic Capacitors"
     - "76.8kOhm 0603 Resistor"
     - "LM2596S-5.0 Buck Converter"
-    - "10uF 25V Capacitor 0805"
 
     Returns None if fetch fails.
     """
     try:
-        # JLC API endpoint (this is the endpoint JLC2KiCadLib uses)
-        url = f"https://yun.easyeda.com/api/products/{jlc_id}/components?version=6.5.43"
+        # LCSC API endpoint (LCSC is JLCPCB's component supplier)
+        url = f"https://wmsc.lcsc.com/ftps/wm/product/detail?productCode={jlc_id}"
 
-        response = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
         data = response.json()
 
-        # Extract useful description from the API response
+        # Extract description from the API response
         if "result" in data and data["result"]:
-            component = data["result"]
+            result = data["result"]
 
-            # Try to build a nice description from available fields
-            description = component.get("description", "")
+            # Get the English introduction which has a nice concise description
+            description = result.get("productIntroEn", "")
 
-            # Clean up the description (remove excessive details)
             if description:
-                # Take first line if multi-line
-                description = description.split('\n')[0].strip()
+                # Clean up the description
+                description = description.strip()
+                # Remove "RoHS" suffix if present
+                description = description.replace(" RoHS", "").replace(" ROHS", "")
                 # Limit length
-                if len(description) > 80:
-                    description = description[:77] + "..."
+                if len(description) > 100:
+                    description = description[:97] + "..."
 
-            return description if description else None
+                return description if description else None
 
     except Exception:
         # Silently fail - description is optional
         return None
 
 
-def fetch_component_details(jlc_id: str) -> Optional[dict]:
+def fetch_component_details(jlc_id: str) -> dict | None:
     """
-    Fetch full component details from JLC API.
+    Fetch full component details from LCSC/JLCPCB API.
 
     Returns dict with keys like:
-    - description: str
-    - manufacturer: str
-    - mfr_part: str
-    - package: str
-    - price: str
-    - stock: int
+    - productIntroEn: str (description)
+    - componentBrandEn: str (manufacturer)
+    - componentModelEn: str (model/part number)
+    - componentSpecificationEn: str (specifications)
+    - etc.
     """
     try:
-        url = f"https://yun.easyeda.com/api/products/{jlc_id}/components?version=6.5.43"
+        url = f"https://wmsc.lcsc.com/ftps/wm/product/detail?productCode={jlc_id}"
 
-        response = requests.get(url, timeout=10)
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
 
         data = response.json()

@@ -1,1 +1,10 @@
 __pycache__
+dist
+.venv
+.ruff_cache
+.claude
+
+# Test coverage
+htmlcov/
+.coverage
+.pytest_cache/

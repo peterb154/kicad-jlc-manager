@@ -1,7 +1,8 @@
 """KiCad project detection and management."""
 
+import json
+import uuid
 from pathlib import Path
-from typing import Optional
 
 
 class KiCadProject:
@@ -12,7 +13,7 @@ class KiCadProject:
         self.root_dir = root_dir
         self.project_file = self._find_project_file()
 
-    def _find_project_file(self) -> Optional[Path]:
+    def _find_project_file(self) -> Path | None:
         """Find the .kicad_pro file in the project directory."""
         pro_files = list(self.root_dir.glob("*.kicad_pro"))
         if pro_files:
@@ -31,31 +32,31 @@ class KiCadProject:
             return self.project_file.stem
         return "unknown"
 
-    def get_lib_dir(self, custom_dir: Optional[str] = None) -> Path:
+    def get_lib_dir(self, custom_dir: str | None = None) -> Path:
         """Get the library directory path (jlclib/ by default)."""
         if custom_dir:
             return self.root_dir / custom_dir
         return self.root_dir / "jlclib"
 
-    def get_symbol_lib_path(self, lib_dir: Optional[Path] = None) -> Path:
+    def get_symbol_lib_path(self, lib_dir: Path | None = None) -> Path:
         """Get the symbol library file path."""
         if lib_dir is None:
             lib_dir = self.get_lib_dir()
         return lib_dir / "symbol" / "jlc_project.kicad_sym"
 
-    def get_footprint_lib_path(self, lib_dir: Optional[Path] = None) -> Path:
+    def get_footprint_lib_path(self, lib_dir: Path | None = None) -> Path:
         """Get the footprint library directory path."""
         if lib_dir is None:
             lib_dir = self.get_lib_dir()
         return lib_dir / "footprint"
 
-    def get_3dmodel_lib_path(self, lib_dir: Optional[Path] = None) -> Path:
+    def get_3dmodel_lib_path(self, lib_dir: Path | None = None) -> Path:
         """Get the 3D model library directory path."""
         if lib_dir is None:
             lib_dir = self.get_lib_dir()
         return lib_dir / "3dmodels"
 
-    def ensure_lib_structure(self, lib_dir: Optional[Path] = None):
+    def ensure_lib_structure(self, lib_dir: Path | None = None):
         """Create the library directory structure if it doesn't exist."""
         if lib_dir is None:
             lib_dir = self.get_lib_dir()
@@ -76,8 +77,51 @@ class KiCadProject:
                 "(kicad_symbol_lib (version 20210201) (generator kicad-jlc-manager)\n)\n"
             )
 
+    def create_minimal_project(self, project_name: str):
+        """
+        Create minimal KiCad project files in the current directory.
 
-def find_kicad_project(start_dir: Optional[Path] = None) -> Optional[KiCadProject]:
+        Args:
+            project_name: Name for the project (without .kicad_pro extension)
+        """
+        # Create minimal .kicad_pro file
+        pro_file = self.root_dir / f"{project_name}.kicad_pro"
+        pro_content = {
+            "meta": {
+                "filename": f"{project_name}.kicad_pro",
+                "version": 3
+            }
+        }
+        pro_file.write_text(json.dumps(pro_content, indent=2) + "\n")
+
+        # Create minimal .kicad_sch file
+        sch_file = self.root_dir / f"{project_name}.kicad_sch"
+        sch_uuid = str(uuid.uuid4())
+        sch_content = f"""(kicad_sch
+\t(version 20250114)
+\t(generator "kicad-jlc-manager")
+\t(uuid {sch_uuid})
+\t(paper "A4")
+\t(lib_symbols)
+\t(sheet_instances
+\t\t(path "/"
+\t\t\t(page "1")
+\t\t)
+\t)
+)
+"""
+        sch_file.write_text(sch_content)
+
+        # Create minimal .kicad_pcb file
+        pcb_file = self.root_dir / f"{project_name}.kicad_pcb"
+        pcb_content = '(kicad_pcb (version 20241229) (generator "kicad-jlc-manager")\n)\n'
+        pcb_file.write_text(pcb_content)
+
+        # Update the project_file reference
+        self.project_file = pro_file
+
+
+def find_kicad_project(start_dir: Path | None = None) -> KiCadProject | None:
     """
     Find a KiCad project by searching upward from the start directory.
 

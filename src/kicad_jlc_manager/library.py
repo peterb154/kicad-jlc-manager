@@ -1,7 +1,6 @@
 """KiCad library table management (sym-lib-table and fp-lib-table)."""
 
 from pathlib import Path
-from typing import Optional
 
 
 class LibraryTableManager:

@@ -1,14 +1,29 @@
 """CLI interface for kicad-jlc-manager using Click."""
 
-import click
 import subprocess
 import sys
 from pathlib import Path
 
-from .project import find_kicad_project
-from .library import LibraryTableManager
+import click
+
+from .component import update_symbol_in_file
 from .config import ProjectConfig
-from .jlc_api import fetch_component_description
+from .jlc_api import fetch_component_details
+from .library import LibraryTableManager
+from .project import find_kicad_project
+
+
+def get_project_or_cwd():
+    """Get KiCad project if found, otherwise use current directory."""
+    project = find_kicad_project()
+
+    if project:
+        return project, project.root_dir
+    else:
+        # No KiCad project yet - use current directory
+        root_dir = Path.cwd()
+        from .project import KiCadProject
+        return KiCadProject(root_dir), root_dir
 
 
 @click.group()
@@ -24,23 +39,11 @@ def main():
 @click.option("--lib-name", help="Custom library name (default: JLC_Project)")
 def add(part_number: str, lib_dir: str | None, lib_name: str | None):
     """Add a JLC component to the project library."""
-    # Defaults
-    lib_dir = lib_dir or "jlclib"
-    lib_name = lib_name or "JLC_Project"
-
-    # Find KiCad project
-    click.echo("Detecting KiCad project...")
-    project = find_kicad_project()
-
-    if not project:
-        click.secho("✗ No KiCad project found in current or parent directories", fg="red")
-        click.echo("  Make sure you're inside a KiCad project directory (contains .kicad_pro file)")
-        sys.exit(1)
-
-    click.echo(f"  Found project: {project.name}")
+    # Get project (or current directory)
+    project, root_dir = get_project_or_cwd()
 
     # Check if project is initialized
-    config = ProjectConfig(project.root_dir)
+    config = ProjectConfig(root_dir)
     if not config.config_file.exists():
         click.secho("✗ Project not initialized", fg="red")
         click.echo("  Run 'jlcmgr init' first to set up the library structure")
@@ -63,7 +66,7 @@ def add(part_number: str, lib_dir: str | None, lib_name: str | None):
     lib_path = project.get_lib_dir(lib_dir)
 
     try:
-        result = subprocess.run(
+        subprocess.run(
             [
                 "JLC2KiCadLib",
                 part_number,
@@ -79,12 +82,21 @@ def add(part_number: str, lib_dir: str | None, lib_name: str | None):
         )
         click.echo("  Component generated successfully")
 
-        # Fetch description from JLC API
-        click.echo("  Fetching component details...")
-        description = fetch_component_description(part_number)
+        # Fetch full details from JLC API
+        click.echo("  Fetching component details from LCSC API...")
+        api_details = fetch_component_details(part_number)
 
-        # Track component in config with optional description
-        config.add_component(part_number, description or "")
+        # Update symbol file with better descriptions and values
+        if api_details:
+            click.echo("  Updating symbol with improved descriptions and values...")
+            symbol_file = project.get_symbol_lib_path(lib_path)
+            if update_symbol_in_file(symbol_file, part_number, api_details):
+                click.echo("  ✓ Symbol updated with component details")
+            else:
+                click.echo("  ◦ Symbol already has content or no API data")
+
+        # Track component in config
+        config.add_component(part_number)
 
     except subprocess.CalledProcessError as e:
         click.secho(f"✗ Failed to generate component: {e.stderr}", fg="red")
@@ -95,58 +107,123 @@ def add(part_number: str, lib_dir: str | None, lib_name: str | None):
         sys.exit(1)
 
     click.secho(f"✓ Component {part_number} added to project", fg="green")
-    click.echo(f"  Tracked in jlcproject.toml")
+    click.echo("  Tracked in jlcproject.toml")
 
 
 @main.command()
 @click.argument("part_number")
 def remove(part_number: str):
     """Remove a JLC component from the project library."""
+    # Get project (or current directory)
+    project, root_dir = get_project_or_cwd()
+
+    # Check if project is initialized
+    config = ProjectConfig(root_dir)
+    if not config.config_file.exists():
+        click.secho("✗ Project not initialized", fg="red")
+        click.echo("  Run 'jlcmgr init' first")
+        sys.exit(1)
+
+    # Remove component from config
     click.echo(f"Removing component {part_number}...")
-    # TODO: Implement remove logic
+    if not config.remove_component(part_number):
+        click.secho(f"✗ Component {part_number} not found in jlcproject.toml", fg="red")
+        sys.exit(1)
+
+    click.echo("  Updated jlcproject.toml")
+
+    # Rebuild library to remove the component files
+    # This is simpler and safer than trying to edit the symbol file directly
+    click.echo("  Rebuilding library...")
+
+    lib_dir = config.get_lib_dir()
+    lib_name = config.get_lib_name()
+    components = config.get_components()
+
+    lib_path = project.get_lib_dir(lib_dir)
+    if lib_path.exists():
+        import shutil
+        shutil.rmtree(lib_path)
+
+    # Recreate library structure
+    project.ensure_lib_structure(lib_path)
+
+    # Ensure library tables are configured
+    lib_manager = LibraryTableManager(project.root_dir)
+    lib_manager.ensure_symbol_library(lib_name, lib_dir)
+    lib_manager.ensure_footprint_library(lib_name, lib_dir)
+
+    # Re-download remaining components and update their symbols
+    if components:
+        symbol_file = project.get_symbol_lib_path(lib_path)
+        for comp in components:
+            try:
+                # Generate component with JLC2KiCadLib
+                subprocess.run(
+                    [
+                        "JLC2KiCadLib",
+                        comp,
+                        "-dir",
+                        str(lib_path),
+                        "-symbol_lib",
+                        "jlc_project",
+                        "--skip_existing",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                # Update symbol with better descriptions and values
+                api_details = fetch_component_details(comp)
+                if api_details:
+                    update_symbol_in_file(symbol_file, comp, api_details)
+
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                pass  # Ignore errors during rebuild
+
     click.secho(f"✓ Component {part_number} removed", fg="green")
 
 
 @main.command()
 @click.option("--detailed", is_flag=True, help="Show detailed component information")
 def list(detailed: bool):
-    """List all components from jlcproject.toml."""
-    # Find KiCad project
-    project = find_kicad_project()
+    """List all components installed in the symbol library."""
+    from .component import get_component_details_from_symbol
 
-    if not project:
-        click.secho("✗ No KiCad project found in current or parent directories", fg="red")
-        sys.exit(1)
+    # Get project (or current directory)
+    project, root_dir = get_project_or_cwd()
 
     # Check if project is initialized
-    config = ProjectConfig(project.root_dir)
+    config = ProjectConfig(root_dir)
     if not config.config_file.exists():
         click.secho("✗ Project not initialized", fg="red")
         click.echo("  Run 'jlcmgr init' first")
         sys.exit(1)
 
-    # Load components from config
-    config_data = config.load()
-    components = config_data.get("components", {})
+    # Get installed components from symbol file (source of truth)
+    lib_dir = config.get_lib_dir()
+    symbol_file = project.get_symbol_lib_path(project.get_lib_dir(lib_dir))
+    components = get_component_details_from_symbol(symbol_file)
 
     if not components:
-        click.echo("No components in project")
+        click.echo("No components in library")
         return
 
-    # Handle both dict and list format
-    from builtins import list as list_type, dict as dict_type
-    if isinstance(components, list_type):
-        components_dict = {comp: "" for comp in components}
-    else:
-        components_dict = components
+    click.echo(f"Components in {project.name} ({len(components)}):\n")
 
-    click.echo(f"Components in {project.name} ({len(components_dict)}):\n")
+    for jlc_id, info in components.items():
+        value = info.get("value", "")
+        description = info.get("description", "")
 
-    for jlc_id, description in components_dict.items():
+        # Build single-line output: JLC ID, value, description
+        line_parts = [f"  • {jlc_id}"]
+        if value:
+            line_parts.append(value)
         if description:
-            click.echo(f"  • {jlc_id}  ({description})")
-        else:
-            click.echo(f"  • {jlc_id}")
+            line_parts.append(f"- {description}")
+
+        click.echo("  ".join(line_parts))
 
         if detailed:
             # Show JLC URL for detailed view
@@ -156,19 +233,11 @@ def list(detailed: bool):
 @main.command()
 def sync():
     """Sync/update all components from jlcproject.toml (like 'uv sync')."""
-    # Find KiCad project
-    click.echo("Detecting KiCad project...")
-    project = find_kicad_project()
-
-    if not project:
-        click.secho("✗ No KiCad project found in current or parent directories", fg="red")
-        click.echo("  Make sure you're inside a KiCad project directory (contains .kicad_pro file)")
-        sys.exit(1)
-
-    click.echo(f"  Found project: {project.name}")
+    # Get project (or current directory)
+    project, root_dir = get_project_or_cwd()
 
     # Check if project is initialized
-    config = ProjectConfig(project.root_dir)
+    config = ProjectConfig(root_dir)
     if not config.config_file.exists():
         click.secho("✗ Project not initialized", fg="red")
         click.echo("  Run 'jlcmgr init' first to set up the library structure")
@@ -188,7 +257,7 @@ def sync():
     # Clean sync: remove existing library to ensure exact match with manifest
     lib_path = project.get_lib_dir(lib_dir)
     if lib_path.exists():
-        click.echo(f"  Cleaning existing library...")
+        click.echo("  Cleaning existing library...")
         import shutil
         shutil.rmtree(lib_path)
 
@@ -204,12 +273,14 @@ def sync():
     # Sync each component
     success_count = 0
     fail_count = 0
+    symbol_file = project.get_symbol_lib_path(lib_path)
 
     for part_number in components:
         try:
             click.echo(f"  • {part_number}...", nl=False)
 
-            result = subprocess.run(
+            # Generate component with JLC2KiCadLib
+            subprocess.run(
                 [
                     "JLC2KiCadLib",
                     part_number,
@@ -223,6 +294,11 @@ def sync():
                 text=True,
                 check=True,
             )
+
+            # Update symbol with better descriptions and values
+            api_details = fetch_component_details(part_number)
+            if api_details:
+                update_symbol_in_file(symbol_file, part_number, api_details)
 
             click.secho(" ✓", fg="green")
             success_count += 1
@@ -249,20 +325,21 @@ def sync():
 @click.option("--lib-dir", help="Custom library directory (default: jlclib/)")
 @click.option("--lib-name", help="Custom library name (default: JLC_Project)")
 def init(lib_dir: str | None, lib_name: str | None):
-    """Initialize project library structure (optional, auto-happens on first add)."""
-    # Find KiCad project
-    click.echo("Detecting KiCad project...")
-    project = find_kicad_project()
+    """Initialize project library structure before or after creating KiCad project."""
+    # Get project (or current directory)
+    project, root_dir = get_project_or_cwd()
 
-    if not project:
-        click.secho("✗ No KiCad project found in current or parent directories", fg="red")
-        click.echo("  Make sure you're inside a KiCad project directory (contains .kicad_pro file)")
-        sys.exit(1)
-
-    click.echo(f"  Found project: {project.name}")
+    if project.is_valid:
+        click.echo(f"Found KiCad project: {project.name}")
+    else:
+        # Create minimal KiCad project files
+        project_name = root_dir.name
+        click.echo(f"No KiCad project found - creating minimal project: {project_name}")
+        project.create_minimal_project(project_name)
+        click.echo(f"  Created {project_name}.kicad_pro, .kicad_sch, .kicad_pcb")
 
     # Create/load configuration
-    config = ProjectConfig(project.root_dir)
+    config = ProjectConfig(root_dir)
     lib_dir = lib_dir or config.get_lib_dir()
     lib_name = lib_name or config.get_lib_name()
 
@@ -276,7 +353,7 @@ def init(lib_dir: str | None, lib_name: str | None):
 
     # Ensure library tables are configured
     click.echo("Configuring library tables...")
-    lib_manager = LibraryTableManager(project.root_dir)
+    lib_manager = LibraryTableManager(root_dir)
     lib_manager.ensure_symbol_library(lib_name, lib_dir)
     lib_manager.ensure_footprint_library(lib_name, lib_dir)
 
@@ -285,7 +362,7 @@ def init(lib_dir: str | None, lib_name: str | None):
 
     click.secho("✓ Project library initialized", fg="green")
     click.echo(f"  Library: {lib_name} → {lib_dir}/")
-    click.echo(f"  Use 'jlcmgr add <part>' to add components")
+    click.echo("  Use 'jlcmgr add <part>' to add components")
 
 
 if __name__ == "__main__":

@@ -39,20 +39,25 @@ uv sync --group dev
 ## Quick Start
 
 ```bash
-# 1. Navigate to your KiCad project directory
-cd ~/my-kicad-project
+# Start a new project (no KiCad files needed!)
+mkdir my-board
+cd my-board
 
-# 2. Initialize project-local library structure
+# Initialize - creates minimal KiCad project files automatically
 jlcmgr init
 
-# 3. Add JLC components to your project
+# Add JLC components to your project
 jlcmgr add C194349  # 10k ohm 0402 resistor
 jlcmgr add C23107   # 100nF 0402 capacitor
 
-# 4. View your project's components
+# Open in KiCad and start designing
+kicad .  # On macOS with alias: alias kicad='open -a KiCad'
+# Note: Once KiCad opens, use File > Open Project and select the .kicad_pro file
+
+# View your project's components
 jlcmgr list
 
-# 5. Sync components (useful after git clone or pulling jlcproject.toml changes)
+# Sync components (useful after git clone or pulling jlcproject.toml changes)
 jlcmgr sync
 ```
 
@@ -60,13 +65,21 @@ jlcmgr sync
 
 ### `jlcmgr init`
 
-Initialize the project library structure. Creates:
+Initialize the project library structure. If no KiCad project exists in the current directory, creates minimal KiCad project files automatically (project name defaults to directory name, just like `uv`).
+
+Creates:
+
+- Minimal KiCad project files (if not present):
+  - `<project-name>.kicad_pro` - Project configuration
+  - `<project-name>.kicad_sch` - Empty schematic
+  - `<project-name>.kicad_pcb` - Empty PCB layout
 - `jlclib/` directory structure (symbol/ and footprint/ subdirectories)
 - `jlcproject.toml` manifest file
 - Library table entries (`sym-lib-table`, `fp-lib-table`)
 - `.gitignore` entry to exclude `jlclib/`
 
 Options:
+
 - `--lib-dir`: Custom library directory (default: `jlclib`)
 - `--lib-name`: Custom library name (default: `JLC_Project`)
 
@@ -119,30 +132,73 @@ jlcmgr remove C194349
 
 ## Workflow
 
-### Typical Development Workflow
+### Starting a New Project (Streamlined)
+
+The fastest way to start a new KiCad project with JLC component management:
 
 ```bash
-# Start a new KiCad project
-kicad-cli pcb new my-project.kicad_pro
-cd my-project/
+# Create and initialize in one flow
+mkdir my-board
+cd my-board
+jlcmgr init
 
-# Initialize jlcmgr
+# Add components
+jlcmgr add C194349  # 10kΩ 0402 resistor
+jlcmgr add C23107   # 100nF 0402 capacitor
+jlcmgr add C2040    # LED 0805 Red
+
+# Open in KiCad - components are ready to use!
+kicad .  # or: open -a KiCad .
+# Once KiCad launches, go to File > Open Project and select my-board.kicad_pro
+```
+
+**On macOS**, add this to your `~/.zshrc` for the `kicad` command:
+
+```bash
+# Allow 'kicad .' to open KiCad in current directory
+alias kicad='open -a KiCad'
+```
+
+**Note**: The `kicad .` command opens the KiCad application but doesn't automatically load your project. After KiCad launches, you'll need to manually open the project file (`.kicad_pro`) via File > Open Project.
+
+What happens during `jlcmgr init`:
+
+1. **Creates minimal KiCad project files** (if none exist):
+   - `my-board.kicad_pro` - Project config
+   - `my-board.kicad_sch` - Empty schematic
+   - `my-board.kicad_pcb` - Empty PCB
+   - Project name automatically matches directory name
+2. **Sets up library infrastructure**:
+   - `jlclib/` directory for components
+   - `jlcproject.toml` manifest
+   - `sym-lib-table` and `fp-lib-table` configurations
+   - `.gitignore` to exclude generated files
+
+### Working with Existing Projects
+
+If you already have a KiCad project:
+
+```bash
+# Navigate to existing project directory
+cd ~/existing-project/
+
+# Initialize jlcmgr (detects existing .kicad_pro)
 jlcmgr init
 
 # Add components as you design
-jlcmgr add C194349  # Resistor
-jlcmgr add C23107   # Capacitor
-jlcmgr add C2040    # LED
-
-# Check what's in your project
+jlcmgr add C194349
 jlcmgr list
+```
 
-# Open KiCad and use the JLC_Project library
-# Components are now available in the symbol/footprint picker
+### Git Workflow
 
-# Commit the manifest (library files are excluded via .gitignore)
-git add jlcproject.toml sym-lib-table fp-lib-table
-git commit -m "Add JLC components"
+```bash
+# After adding components, commit the manifest
+git add jlcproject.toml sym-lib-table fp-lib-table .gitignore
+git commit -m "Add JLC component library with resistors and capacitors"
+
+# The jlclib/ directory is automatically excluded via .gitignore
+# (just like .venv or node_modules)
 ```
 
 ### Cloning/Sharing Projects
@@ -291,11 +347,150 @@ MIT
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/kicad-jlc-manager.git
+cd kicad-jlc-manager
+
+# Install with dev dependencies
+uv sync --group dev
+
+# Verify installation
+uv run jlcmgr --help
+```
+
+### Running Tests and Linting
+
+```bash
+# Run linter (check only)
+make lint
+
+# Run linter with auto-fix
+make lint-fix
+
+# Run tests with coverage
+make test
+
+# Run tests with detailed coverage report
+make test-cov
+
+# Run tests without coverage (faster)
+make test-quick
+
+# View all available commands
+make help
+```
+
+### Semantic Versioning
+
+This project uses [Python Semantic Release](https://python-semantic-release.readthedocs.io/) for automated versioning and releases. Versions are determined automatically based on commit messages following the [Conventional Commits](https://www.conventionalcommits.org/) specification.
+
+#### Commit Message Format
+
+Use these prefixes to control version bumping:
+
+- `feat:` - New feature (bumps **minor** version: 0.1.0 → 0.2.0)
+- `fix:` - Bug fix (bumps **patch** version: 0.1.0 → 0.1.1)
+- `perf:` - Performance improvement (bumps **patch** version)
+- `docs:` - Documentation changes (no version bump)
+- `style:` - Code style changes (no version bump)
+- `refactor:` - Code refactoring (no version bump)
+- `test:` - Test changes (no version bump)
+- `chore:` - Build/tooling changes (no version bump)
+- `ci:` - CI/CD changes (no version bump)
+
+For breaking changes, add `!` after the type or include `BREAKING CHANGE:` in the commit body (bumps **major** version: 0.1.0 → 1.0.0).
+
+#### Commit Examples
+
+```bash
+# Feature (minor version bump)
+git commit -m "feat: add component search functionality"
+
+# Bug fix (patch version bump)
+git commit -m "fix: resolve sync error with missing files"
+
+# Bug fix with more detail
+git commit -m "fix: handle empty component descriptions in API response
+
+Previously the tool would crash if JLC API returned null description.
+Now it gracefully handles missing descriptions."
+
+# Breaking change (major version bump)
+git commit -m "feat!: redesign library structure
+
+BREAKING CHANGE: Library directory structure has changed from flat
+to nested. Users need to run 'jlcmgr sync' after upgrading."
+
+# Non-versioned changes
+git commit -m "docs: update installation instructions"
+git commit -m "chore: update dependencies"
+```
+
+#### Local Version Checking
+
+```bash
+# Preview what the next version would be (dry-run)
+make version
+
+# Create a release locally (updates version, creates tag)
+make release
+
+# After local release, push with tags
+git push --follow-tags
+```
+
+#### Automated Release Process
+
+When you push to the `main` branch:
+
+1. **PR Workflow** (`.github/workflows/pr-checks.yaml`)
+   - Runs `make lint` and `make test` in parallel
+   - Must pass before merging
+
+2. **Publish Workflow** (`.github/workflows/publish.yaml`)
+   - Runs `make lint` and `make test` in parallel
+   - Analyzes commits since last release
+   - Determines next version based on conventional commits
+   - Updates `pyproject.toml` version and `CHANGELOG.md`
+   - Creates git tag (e.g., `v0.2.0`)
+   - Builds package with `uv build`
+   - Publishes to PyPI using trusted publisher
+   - Pushes version bump commit and tag back to repo
+
+**Note**: Only commits following the conventional format will trigger version bumps. Regular commits (without conventional prefixes) won't create new releases.
+
+### Pull Request Workflow
+
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+3. Make your changes with conventional commits:
+
+   ```bash
+   git commit -m "feat: add new awesome feature"
+   git commit -m "test: add tests for awesome feature"
+   git commit -m "docs: document awesome feature"
+   ```
+
+4. Push to your fork (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+   - The PR checks workflow will run tests and linting
+   - Ensure all checks pass before requesting review
+6. After merge to `main`, the release workflow will automatically:
+   - Determine the new version from your commits
+   - Publish to PyPI if version was bumped
+   - Create a GitHub release with changelog
+
+### Code Style
+
+- Python 3.12+
+- Line length: 100 characters
+- Use type hints (`str | None` style)
+- Follow ruff linting rules (see `pyproject.toml`)
+- Write tests for new features
+- Update documentation as needed
 
 ## Support
 
