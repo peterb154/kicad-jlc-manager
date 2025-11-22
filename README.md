@@ -4,7 +4,18 @@
 
 Bring the `.venv` / `node_modules` paradigm to KiCad component libraries. Manage JLCPCB components on a per-project basis with a declarative manifest file, just like `pyproject.toml` or `package.json`.
 
-## Why?
+## Why JLC Components?
+
+**Design for Manufacture (DFM)** - When you design PCBs with components from the [JLCPCB parts library](https://jlcpcb.com/parts/), manufacturing becomes seamless. JLCPCB stocks thousands of components that can be automatically assembled onto your boards. By selecting parts from their database during the design phase, you get:
+
+- **Instant assembly**: No need to source or ship components separately
+- **Lower costs**: Basic parts (resistors, capacitors, common ICs) often have no assembly fees
+- **Faster turnaround**: Components are already in stock at the fab
+- **Verified footprints**: All parts have tested footprints and mounting specifications
+
+This tool makes it trivial to browse, add, and manage JLC components directly in your KiCad workflow.
+
+## Why Project-Local Libraries?
 
 Traditional KiCad workflows use globally configured component libraries, which creates several problems:
 
@@ -236,13 +247,13 @@ my-project/
 
 ## jlcproject.toml Format
 
-The manifest file uses a simple TOML format with optional inline comments for descriptions:
+The manifest file uses a simple TOML format to track component part numbers:
 
 ```toml
 components = [
-    "C194349",  # 10kOhm 0402 resistor
-    "C23107",   # 100nF 0402 capacitor
-    "C2040",    # LED 0805 Red
+    "C194349",
+    "C23107",
+    "C2040",
 ]
 
 [project]
@@ -250,7 +261,7 @@ lib-dir = "jlclib"
 lib-name = "JLC_Project"
 ```
 
-Comments are fetched automatically from the JLC API when you run `jlcmgr add`, but you can edit them manually.
+Component descriptions and metadata are fetched from the JLC API and stored directly in the KiCad symbol files, not in the manifest.
 
 ## How It Works
 
@@ -286,7 +297,28 @@ The `${KIPRJMOD}` variable ensures paths work correctly regardless of where the 
 
 ### Component Generation
 
-Under the hood, `kicad-jlc-manager` uses [JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib) to fetch component data from JLCPCB and generate KiCad-compatible symbol and footprint files.
+Under the hood, `kicad-jlc-manager` uses the excellent [JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib) by Nicolas Toussaint to fetch component data from JLCPCB and generate KiCad-compatible symbol and footprint files.
+
+**What JLC2KiCadLib provides:**
+
+- Downloads component specifications from JLCPCB API
+- Generates KiCad symbol files (`.kicad_sym`)
+- Creates footprint files (`.kicad_mod`)
+- Includes 3D models when available
+
+**What kicad-jlc-manager adds:**
+
+- **Enhanced component metadata**: Fetches human-readable descriptions from the JLC API and stores them in the symbol library's `value` and `description` fields
+- **Better component values**: Extracts and normalizes electrical values (resistance, capacitance, etc.) for display in schematics
+- **Project-local management**: Wraps JLC2KiCadLib with a UV-inspired workflow for project isolation
+- **Git-friendly tracking**: Maintains a declarative manifest for reproducible builds
+
+When you add a component with `jlcmgr add C194349`, the tool:
+
+1. Calls JLC2KiCadLib to generate the component files
+2. Fetches the component's description from the JLC API
+3. Enhances the symbol with the description as the component value
+4. Tracks the component in your `jlcproject.toml` manifest
 
 ## Requirements
 
@@ -334,10 +366,12 @@ This tool is inspired by modern package managers like `uv` and `npm`:
 | Team collaboration | Manual sync required | Git handles sync |
 | Isolation | Shared across projects | Isolated per project |
 
-## Related Projects
+## Credits and Related Projects
 
-- [JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib) - Component file generator (used internally)
-- [JLCPCB](https://jlcpcb.com/) - PCB manufacturer with component library
+This tool builds upon the excellent work of:
+
+- **[JLC2KiCadLib](https://github.com/TousstNicolas/JLC2KiCad_lib)** by Nicolas Toussaint - The core component file generator that does the heavy lifting of converting JLCPCB data into KiCad symbols and footprints. Without this library, kicad-jlc-manager would not be possible.
+- **[JLCPCB Parts Library](https://jlcpcb.com/parts/)** - The component database that makes design-for-manufacture accessible to hobbyists and professionals alike.
 
 ## License
 
